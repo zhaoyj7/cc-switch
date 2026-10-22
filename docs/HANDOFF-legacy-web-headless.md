@@ -11,6 +11,8 @@
   处理完（**只补命令 + 加说明**，§6.1），不再有等功能决策。
 - 部署产物两条路都已重编复验（见下方 ✅）。`src-legacy/` 仍与 tag `v3.20.4` 逐字节一致（§2 的核验命令）。
 - 本机现场已清理（§6.3），只剩 `.e2e-home` 与在跑的 14515。
+- **改动集已提交并推送**（`0912b6c1`，578 个文件），push 触发的 `ci.yml` **六个 job 全绿**（§12.5）。
+  新增的 `build-artifacts.yml` 只注册未运行，等手动 dispatch。
 
 **剩下**：① 一件功能活 —— 桌面版 `tauri.conf.json` 仍指向 v4 UI（§6.2）；② §11 里那 5 条行为决策 +
 仓库卫生的 ⑩⑪，仍等你拍板（改动集本身已提交推送，§10 第 6 条）。
@@ -543,7 +545,8 @@ MSYS_NO_PATHCONV=1 wsl.exe -u root bash -c 'cp /mnt/d/projects/ccs/tools/wsl-el9
    > `src-tauri/` 54、`tools/` 35、`web/` 15、`deploy/` 3 + 配置/文档/`.github`）。`.e2e-home/`、
    > `dist-legacy/`、`src-tauri/target/`、`.ci-sandbox/` 都靠新补的 `.gitignore` 挡在外面（§12.4），
    > 没有 `git add -A` 误带。**§11.1 / §11.2 的决策项和 §11.3 的 ⑩⑪ 仍未处理**，push 到 main 会触发
-   > `ci.yml`（三门 Rust + 前端 job）——本机证据见 §12.2，那 3 个 vitest 既有失败在 CI 上绿不绿没人验过。
+   > `ci.yml`（三门 Rust + 前端 job）——本机证据见 §12.2，push 后**六个 job 全绿**，
+   > 那 3 个 vitest 本机失败在 CI（ubuntu + node 20）上不复现（实测见 §12.5）。
 
 ### 10.1 部署原生二进制到 EL9 的现成路径
 `deploy/cc-switch-server.service` 的 `ExecStart=/usr/local/bin/cc-switch-server`
@@ -705,7 +708,8 @@ rust-embed 在**编译期**读盘，目录不存在就直接报 `error: #[derive
   `UsageDashboard.test.tsx > draws the request log with the columns picked in settings`、
   `UsageDashboard.test.tsx > wires the tabs to the tabpanel and supports arrow / Home / End keys`。
   → 结论：**本机 Node 26 环境下的既有失败**，不是本次改动引入。CI 用的是 ubuntu + node 20，
-  这三个在 CI 上绿不绿没人验过，别把它们算到这次改动头上，也别顺手去"修"。
+  push 后那一跑**实测是绿的**（§12.5：`Unit tests` step 08:19:31→08:23:34 success）；
+  别把它们算到这次改动头上，也别顺手去"修"。
 - `cargo clippy -- -D warnings`：**第一跑就抓到一处真问题**，就在我们新增的
   `src-tauri/src/command_handler.rs:9`（整个文件 5-407 行就是那个 `#[macro_export] macro_rules!`）——
   宏体里 355 处 `crate::` 会被 clippy 判为 `crate_in_macro_def`：`crate` 在导出宏里指向的是
@@ -775,3 +779,38 @@ rust-embed 在**编译期**读盘，目录不存在就直接报 `error: #[derive
 - 提交前的 staging 预览（`git add -A --dry-run`）：**578 个条目** =
   `src-legacy` 462 + `src-tauri` 54 + `tools` 35 + `web` 15 + `deploy` 3 + 配置/`docs`/`.github`/`.gitignore`/`.dockerignore`。
   `.e2e-home/`、`dist-legacy/`、`src-tauri/target/` 都不在里面。
+
+### 12.5 push 后 CI 实测（2026-10-22，run `39746762224`）——**全绿**
+`git -c http.proxy=http://127.0.0.1:7890 push origin main` → `77c6dc79..0912b6c1`，一个 commit
+`578 files changed, 124067 insertions(+), 1657 deletions(-)`。
+push 到 main 触发 `ci.yml` run #1：<https://github.com/zhaoyj7/cc-switch/actions/runs/39746762224>
+**6 个 job 全部 `success`**（结论从 API 逐 step 读，不是看页面印象：
+`curl -x http://127.0.0.1:7890 .../actions/runs/39746762224/jobs` 再按 `steps[].conclusion` 汇总）：
+- `Detect changed areas` success——`package.json` + `src-tauri/**` + `.github/workflows/**` 都改到，两侧 job 都被拉起。
+- `Frontend Checks` success：typecheck 24s、format:check 9s、**Unit tests 08:19:31→08:23:34 绿**、`build:renderer` 15s。
+  → §12.2 那 3 个本机失败在 CI（ubuntu + node 20）**不复现**。"本机 Node 26/Windows 专属"从推断升级为实测，
+  这也解释了为什么 §12.2 说"别顺手去修"是对的。
+- `Backend Checks` 三平台矩阵（windows-latest / ubuntu-22.04 / macos-latest）全绿：
+  `Check Rust formatting` 各 4-5s、`Clippy`（`-D warnings`）分别 4m31s / 3m11s / 3m54s、`Run tests` 14m25s / 6m35s / 9m39s。
+  两条以前只有本机证据的事，现在拿到跨平台证据：
+  ① **本机 clippy 只能在 Windows/MSVC 上跑**，`#[cfg(unix)]` 与 macOS 分支从来没被 lint 过——CI 补上了这个盲区，
+  没有额外 lint 冒出来（`$crate` 那处修完在三个平台上都干净）。
+  ② 本机 `cargo test` 那两个"失败"归因于系统代理（§3.5）；CI 没带 `NO_PROXY` 也全绿，**反证了那条根因判断**。
+- `Backend Checks (Windows + WSL2 home)` success，两个 ignored 契约测试分别 4s / 25s。
+
+`.github/workflows/build-artifacts.yml` 已被 GitHub 注册成 `state: active`（能列出来就说明 YAML 过了它的解析），
+本地复验：`python3 -c "yaml.safe_load(...)"` → 5 个 job（`preflight/dist-legacy/headless-el9/container/desktop`）、
+dispatch 选项 5 个、文件里 0 个 tab。**但它自己的 job 一次都没跑过**——只有手动 dispatch 才跑，我没替你点
+（CI 分钟数是共享资源）。要试先跑最便宜的那条：`target=dist-legacy`（单 ubuntu job，装依赖 + 构建 + md5，约 3-5 分钟）。
+
+EL9 那道 glibc 门做了**离线判定表实测**（不必等构建产物就能验它的逻辑）：
+```bash
+for v in 2.5 2.17 2.23 2.27 2.28 2.31 2.33 2.34 2.35 2.36 2.38 2.39 2.40 2.41 2.42 3.0 ""; do
+  case "GLIBC_$v" in GLIBC_2.3[5-9]*|GLIBC_2.[4-9][0-9]*|GLIBC_[3-9]*) echo "$v REJECT";; *) echo "$v accept";; esac
+done
+```
+→ **≤ 2.34 全 accept、≥ 2.35 全 REJECT**，含真实存在的 2.40/2.41/2.42（Ubuntu 24.04/25.04 就是这几个版本）。
+`sort -uV` 取最高值也没问题：`2.2.5/2.3.4/2.27/2.14/2.34`→`2.34`；`2.2.5/2.34/2.35/2.4`→`2.35`；
+`2.2.5/2.40/2.9`→`2.40`（逐数字段比较，不会被"字典序里 `2.9` 最大"骗过去——这正是这道门最容易写错的地方）。
+表里唯一暴露的洞：**`max` 为空串时 `case` 一条都不匹配 → 这道门形同不存在**（`readelf` 挂了或 grep 没命中就会静默放行）。
+已补 `[ -n "$max" ] || exit 1`（`.github/workflows/build-artifacts.yml:147`）——按 §2 的约束，守卫本身失效比误报更危险。

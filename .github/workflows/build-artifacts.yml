@@ -143,6 +143,8 @@ jobs:
         run: |
           set -uo pipefail
           max=$(readelf -V cc-switch-server | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)
+          # 空串会让下面的 case 一条都不匹配、门形同不存在，所以先确认它真的读到了东西。
+          [ -n "$max" ] || { echo "::error::readelf -V 没解析出任何 GLIBC_* 版本符号，门无法判定"; exit 1; }
           echo "产物要求的最高 glibc：$max"
           case "$max" in
             GLIBC_2.3[5-9]*|GLIBC_2.[4-9][0-9]*|GLIBC_[3-9]*)
