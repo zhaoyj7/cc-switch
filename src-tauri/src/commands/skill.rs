@@ -5,6 +5,8 @@
 //! - SSOT 存储在 ~/.cc-switch/skills/
 
 use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill};
+#[cfg(feature = "desktop")]
+use crate::compat::AppHandle;
 use crate::error::format_skill_error;
 use crate::services::skill::{
     DiscoverableSkill, ImportSkillSelection, MigrationResult, Skill, SkillAppSyncOutcome,
@@ -14,7 +16,8 @@ use crate::services::skill::{
 use crate::store::AppState;
 use std::str::FromStr;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::State;
+#[cfg(feature = "desktop")]
 use tauri_plugin_opener::OpenerExt;
 
 /// SkillService 状态包装
@@ -190,6 +193,7 @@ pub async fn get_cc_switch_skills_dir() -> Result<String, String> {
     Ok(cc_switch_skills_dir().to_string_lossy().to_string())
 }
 
+#[cfg(feature = "desktop")]
 /// 在系统文件管理器里打开 CC Switch 目录下的 Skills 目录（不存在就先建）
 #[tauri::command]
 pub async fn open_cc_switch_skills_dir(handle: AppHandle) -> Result<bool, String> {

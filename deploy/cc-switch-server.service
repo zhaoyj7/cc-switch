@@ -1,0 +1,38 @@
+# 无头服务部署单元：单二进制同时提供命令 API、事件流和旧前端页面。
+#
+# 安装：
+#   install -m 755 cc-switch-server /usr/local/bin/
+#   install -m 644 deploy/cc-switch-server.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now cc-switch-server
+#
+# 令牌从 /etc/cc-switch/server.env 读（写进 ExecStart 会暴露在 /proc/cmdline）：
+#   echo 'CC_SWITCH_TOKEN=换成你自己的长随机串' > /etc/cc-switch/server.env
+#   chmod 600 /etc/cc-switch/server.env
+
+[Unit]
+Description=cc-switch headless server (API + legacy web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cc-switch-server --bind 127.0.0.1 --port 14515
+# 默认只监听回环，经 SSH 隧道（ssh -L 14515:127.0.0.1:14515 host）访问最安全。
+# 要对外监听必须同时改 --bind 并在环境文件里设置 CC_SWITCH_TOKEN，否则程序拒绝启动。
+EnvironmentFile=-/etc/cc-switch/server.env
+# 数据目录默认 ~/.cc-switch；指定用户时建议显式给出，避免落到 /root 以外用户的 HOME 上。
+Environment=CC_SWITCH_DATA_DIR=/var/lib/cc-switch
+DynamicUser=yes
+StateDirectory=cc-switch
+Restart=always
+RestartSec=2
+
+# 只读取自身数据目录，不碰系统配置
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/cc-switch
+
+[Install]
+WantedBy=multi-user.target

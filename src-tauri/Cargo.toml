@@ -16,8 +16,42 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 doctest = false
 
 [features]
-default = []
+# desktop = 图形界面（wry 内核 + 托盘 + 窗口/对话框/更新等桌面插件）
+# headless = 无头服务模式：只跑 tauri::test 的 MockRuntime，不需要显示器。
+#            store 插件对 Runtime 泛型，两种构建都保留"数据目录覆盖"能力。
+default = ["desktop"]
+desktop = [
+    "tauri/wry",
+    "tauri/compression",
+    "tauri/common-controls-v6",
+    "tauri/dynamic-acl",
+    "tauri/x11",
+    "tauri/dbus",
+    "tauri/tray-icon",
+    "tauri/image-png",
+    "dep:webkit2gtk",
+    "dep:gtk",
+    "dep:tauri-plugin-log",
+    "dep:tauri-plugin-opener",
+    "dep:tauri-plugin-process",
+    "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-deep-link",
+    "dep:tauri-plugin-window-state",
+    "dep:tauri-plugin-single-instance",
+]
+headless = ["tauri/test", "dep:rust-embed"]
 test-hooks = []
+
+[[bin]]
+name = "cc-switch"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "cc-switch-server"
+path = "src/bin/server.rs"
+required-features = ["headless"]
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }
@@ -27,15 +61,20 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-tauri = { version = "2.8.2", features = ["tray-icon", "protocol-asset", "image-png", "macos-private-api"] }
-tauri-plugin-log = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-dialog = "2"
+# protocol-asset / macos-private-api 常驻：tauri-build 会按 tauri.conf.json 的
+# capability 白名单校验 tauri 特性，无头构建同样需要它们。
+tauri = { version = "2.8.2", default-features = false, features = [
+    "protocol-asset",
+    "macos-private-api",
+] }
+tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-store = "2"
-tauri-plugin-deep-link = "2"
-tauri-plugin-window-state = "2"
+tauri-plugin-deep-link = { version = "2", optional = true }
+tauri-plugin-window-state = { version = "2", optional = true }
 dirs = "5.0"
 toml = "0.8"
 toml_edit = "0.22"
@@ -44,13 +83,15 @@ arboard = "3.6"
 flate2 = "1"
 brotli = "7"
 zstd = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "signal"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
 axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
+# 无头版把前端资源打进二进制，单文件部署
+rust-embed = { version = "8", optional = true }
 hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
 hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring", "webpki-tokio"] }
@@ -86,11 +127,13 @@ json-five = "0.3.1"
 sys-locale = "0.3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = { version = "2.0.1", features = ["v2_16"] }
-gtk = "0.18"
+# 只在桌面构建里出现：无头服务用 MockRuntime，没有 webview，不该要求服务器装
+# webkit2gtk / gtk 的开发与运行库。由 desktop 特性经 `dep:` 拉入。
+webkit2gtk = { version = "2.0.1", features = ["v2_16"], optional = true }
+gtk = { version = "0.18", optional = true }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 libc = "0.2"

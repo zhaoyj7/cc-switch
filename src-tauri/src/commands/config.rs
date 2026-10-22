@@ -1,7 +1,11 @@
 #![allow(non_snake_case)]
 
-use tauri::{AppHandle, State};
+#[cfg(feature = "desktop")]
+use crate::compat::AppHandle;
+use tauri::State;
+#[cfg(feature = "desktop")]
 use tauri_plugin_dialog::DialogExt;
+#[cfg(feature = "desktop")]
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
@@ -187,6 +191,7 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, String> {
     let config_dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
@@ -219,6 +224,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
     Ok(true)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn pick_directory(
     app: AppHandle,
@@ -256,6 +262,7 @@ pub async fn get_app_config_path() -> Result<String, String> {
     Ok(config_path.to_string_lossy().to_string())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
     let config_dir = config::get_app_config_dir();
@@ -272,6 +279,7 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(feature = "desktop")]
 /// 在文件管理器中定位应用诊断日志 cc-switch.log；文件还没生成时打开日志目录
 #[tauri::command]
 pub async fn reveal_app_log_file() -> Result<bool, String> {
@@ -322,6 +330,24 @@ pub async fn set_claude_common_config_snippet(
         .set_config_snippet_cleared("claude", is_cleared)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// 编辑器文本级的 TOML 片段合并/剥离（旧版 Codex 供应商表单在用）。
+///
+/// 与 `set_common_config_snippet` 不是一回事：那条写库、影响之后生成的 live 配置，
+/// 这条只是把用户正在编辑、还没保存的 config.toml 缓冲区算出新文本。
+#[tauri::command]
+pub async fn update_toml_common_config_snippet(
+    config_toml: String,
+    snippet_toml: String,
+    enabled: bool,
+) -> Result<String, String> {
+    crate::services::provider::update_toml_common_config_snippet(
+        &config_toml,
+        &snippet_toml,
+        enabled,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

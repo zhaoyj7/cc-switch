@@ -1,5 +1,15 @@
 fn main() {
-    tauri_build::build();
+    if std::env::var_os("CARGO_FEATURE_DESKTOP").is_none() {
+        // 无头构建不编译 tauri 插件，capabilities 里引用的 opener/dialog 等权限不存在，
+        // 让 tauri-build 跳过 capability 扫描（浏览器前端不受 tauri ACL 约束）。
+        tauri_build::try_build(
+            tauri_build::Attributes::new()
+                .capabilities_path_pattern("__no_capabilities_glob__/*.json"),
+        )
+        .expect("headless tauri build");
+    } else {
+        tauri_build::build();
+    }
 
     // Windows: Embed Common Controls v6 manifest for test binaries
     //

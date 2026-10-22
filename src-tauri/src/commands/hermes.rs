@@ -1,5 +1,9 @@
+#[cfg(feature = "desktop")]
+use crate::compat::AppHandle;
+#[cfg(feature = "desktop")]
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::State;
+#[cfg(feature = "desktop")]
 use tauri_plugin_opener::OpenerExt;
 
 use crate::hermes_config;
@@ -8,6 +12,7 @@ use crate::store::AppState;
 /// Error string returned when `open_hermes_web_ui` cannot reach the Hermes
 /// FastAPI server. Kept in sync with the `HERMES_WEB_OFFLINE_ERROR` constant
 /// in `src/hooks/useHermes.ts` so the frontend can branch on it.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 const HERMES_WEB_OFFLINE_ERROR: &str = "hermes_web_offline";
 
 // ============================================================================
@@ -82,6 +87,7 @@ pub fn set_hermes_memory_enabled(
 // Hermes Web UI launcher
 // ============================================================================
 
+#[cfg(feature = "desktop")]
 /// Probe the local Hermes Web UI (FastAPI) and open it in the system browser.
 ///
 /// Port discovery priority:

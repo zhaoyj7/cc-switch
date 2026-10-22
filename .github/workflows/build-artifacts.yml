@@ -1,0 +1,335 @@
+name: Build artifacts（旧 UI 包 / 无头单二进制 / 容器镜像 / 桌面安装包）
+
+# 手动触发；`target` 选要构建哪个版本，`all` 四个一起。
+# 不进 push/PR 触发：桌面与容器构建各自要拉几百 MB 依赖，成本不该摊给每次提交。
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 构建哪个版本
+        type: choice
+        default: all
+        options:
+          - all
+          - dist-legacy # 旧 UI 静态包（给无头版内嵌 / 自己托管都行）
+          - headless-el9 # CentOS Stream 9 原生单二进制（含页面，不需要容器）
+          - container # deploy/Dockerfile 出的镜像
+          - desktop # 桌面安装包（注意：现在 tauri.conf.json 指的还是 v4 UI）
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22" # 与 deploy/Dockerfile 的 node:22.12.0-slim 对齐，别漂到另一个大版本
+
+jobs:
+  # 硬约束守卫：src-legacy/ 必须与 tag v3.20.4 的 src/ 逐字节一致。
+  # 这条是项目的第一原则，任何一次构建前先判一次，后面四个 job 都 needs 它。
+  preflight:
+    name: Preflight（src-legacy 未被改动）
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pin.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # 要读 v3.20.4 这个 tag 的对象
+          persist-credentials: false
+
+      - name: Verify src-legacy is byte-identical to v3.20.4
+        id: pin
+        shell: bash
+        run: |
+          set -uo pipefail
+          tag=v3.20.4
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          tmp=$(mktemp -d)
+          git archive "$tag" src | tar -x -C "$tmp"
+          a=$(find "$tmp/src" -type f | wc -l)
+          b=$(find src-legacy -type f | wc -l)
+          echo "文件数：$tag/src=$a src-legacy=$b"
+          if ! diff -r "$tmp/src" src-legacy; then
+            echo "::error::src-legacy/ 与 $tag 的 src/ 不一致——适配只能写在 vite 配置和 web/ 里"
+            exit 1
+          fi
+          if [ "$a" != "$b" ]; then
+            echo "::error::文件数不一致（$a vs $b）"
+            exit 1
+          fi
+
+  # ── 1. 旧 UI 静态包 ────────────────────────────────────────────────
+  dist-legacy:
+    name: 旧 UI 静态包（dist-legacy）
+    needs: preflight
+    if: github.event.inputs.target == 'all' || github.event.inputs.target == 'dist-legacy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          corepack install
+          pnpm --version
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck:legacy
+      - run: pnpm build:legacy:web
+
+      - name: Fingerprint
+        shell: bash
+        run: |
+          find dist-legacy -type f | sort | wc -l
+          md5sum dist-legacy/assets/index-*.js
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-legacy
+          path: dist-legacy
+          retention-days: 14
+
+  # ── 2. CentOS Stream 9 原生单二进制 ───────────────────────────────
+  headless-el9:
+    name: 无头单二进制（EL9 原生）
+    needs: preflight
+    if: github.event.inputs.target == 'all' || github.event.inputs.target == 'headless-el9'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # 前端在镜像里构建（web 阶段），所以干净克隆不需要预置 dist-legacy：
+      # rust-embed 缺目录是硬编译错误，这一步顺序不能反。
+      - name: Build image
+        run: docker build -f deploy/Dockerfile.el9-native -t ccs-el9-ci .
+
+      - name: Extract single binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid=$(docker create ccs-el9-ci)
+          docker cp "$cid:/out/cc-switch-server" ./cc-switch-server
+          docker rm "$cid" >/dev/null
+          ls -l cc-switch-server
+          sha256sum cc-switch-server
+
+      - name: Guard glibc version requirement（必须 ≤ 2.34）
+        shell: bash
+        run: |
+          set -uo pipefail
+          max=$(readelf -V cc-switch-server | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)
+          echo "产物要求的最高 glibc：$max"
+          case "$max" in
+            GLIBC_2.3[5-9]*|GLIBC_2.[4-9][0-9]*|GLIBC_[3-9]*)
+              echo "::error::出现 EL9 没有的 glibc 版本符号（多半是 hypot@GLIBC_2.35 回来了，见交接文档 §5.3.1）"
+              exit 1 ;;
+          esac
+          readelf -d cc-switch-server | grep -E 'NEEDED.*(webkit|libsoup)' && {
+            echo "::error::DT_NEEDED 里出现了 webkit/libsoup，无头版不该依赖它们"; exit 1; } || true
+
+      # 真正的验收：在最小 stream9 容器里跑起来。先什么都不装试一次，把"裸 EL9 缺什么"
+      # 变成日志里的确定事实，而不是靠猜（gtk3 是 DT_NEEDED 里的运行期需求）。
+      - name: Smoke on bare CentOS Stream 9
+        shell: bash
+        run: |
+          set -uo pipefail
+          docker run --rm -v "$PWD:/art" -w /art quay.io/centos/centos:stream9 bash -lc '
+            echo "--- 裸 EL9（不装任何包）---"
+            ./cc-switch-server --help >/tmp/help.log 2>&1; echo "bare-exit=$?"
+            tail -3 /tmp/help.log
+            echo "--- 装 gtk3(+curl) 后再试 ---"
+            dnf -y install gtk3 curl >/dev/null 2>&1; echo "dnf-exit=$?"
+            ./cc-switch-server --help >/dev/null 2>&1; echo "with-gtk3-exit=$?"
+            mkdir -p /data
+            ./cc-switch-server --bind 127.0.0.1 --port 14515 --data-dir /data >/tmp/srv.log 2>&1 &
+            srv=$!
+            sleep 4
+            curl -sf http://127.0.0.1:14515/api/health; echo " health-exit=$?"
+            curl -sf -X POST http://127.0.0.1:14515/api/invoke \
+              -H "Content-Type: application/json" \
+              -d "{\"cmd\":\"get_default_cost_multiplier\",\"args\":{\"appType\":\"claude\"}}"; echo " invoke-exit=$?"
+            curl -sf http://127.0.0.1:14515/ | grep -o "<title>[^<]*</title>" | head -1; echo " page-exit=$?"
+            echo "--- 服务端日志尾部 ---"
+            tail -10 /tmp/srv.log
+            kill "$srv" 2>/dev/null
+            wait "$srv" 2>/dev/null; echo "shutdown-exit=$?"
+          '
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cc-switch-server-el9-x86_64
+          path: cc-switch-server
+          retention-days: 30
+
+  # ── 3. 容器镜像 ───────────────────────────────────────────────────
+  container:
+    name: 容器镜像
+    needs: preflight
+    if: github.event.inputs.target == 'all' || github.event.inputs.target == 'container'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t cc-switch-server:ci .
+
+      - name: Smoke the running container
+        shell: bash
+        run: |
+          set -uo pipefail
+          # ENTRYPOINT 绑的是 0.0.0.0，服务端会拒绝无令牌的非 loopback 绑定，所以必须给 token
+          docker run -d --name ccs-ci -p 14517:14515 -e CC_SWITCH_TOKEN=ci-token cc-switch-server:ci
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:14517/api/health >/dev/null && break; sleep 1
+          done
+          curl -sf http://127.0.0.1:14517/api/health; echo
+          curl -sf -X POST http://127.0.0.1:14517/api/invoke \
+            -H "Authorization: Bearer ci-token" -H "Content-Type: application/json" \
+            -d "{\"cmd\":\"set_default_cost_multiplier\",\"args\":{\"appType\":\"claude\",\"value\":\"2.5\"}}"; echo
+          curl -sf -X POST http://127.0.0.1:14517/api/invoke \
+            -H "Authorization: Bearer ci-token" -H "Content-Type: application/json" \
+            -d "{\"cmd\":\"get_default_cost_multiplier\",\"args\":{\"appType\":\"claude\"}}"; echo
+          curl -sf http://127.0.0.1:14517/ | grep -o "<title>[^<]*</title>" | head -1
+          echo "--- 无 token 必须 401 ---"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:14517/api/invoke \
+            -H "Content-Type: application/json" -d '{"cmd":"get_app_mode","args":{"app":"claude"}}')
+          echo "no-token-http=$code"
+          [ "$code" = "401" ] || { echo "::error::期望 401，实得 $code"; exit 1; }
+          docker logs ccs-ci | tail -20
+          docker rm -f ccs-ci >/dev/null
+
+      - name: Save image
+        shell: bash
+        run: docker save -o cc-switch-server-container.tar cc-switch-server:ci
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cc-switch-server-container
+          path: cc-switch-server-container.tar
+          retention-days: 7
+
+  # ── 4. 桌面安装包 ─────────────────────────────────────────────────
+  # 走的是 src-tauri/tauri.conf.json 现值（frontendDist ../dist），也就是 **v4 UI**；
+  # 旧 UI 上桌面是交接文档 §6.2，还没拍板，这个 job 不代表那件事已做。
+  desktop:
+    name: 桌面安装包（${{ matrix.os }}）
+    needs: preflight
+    if: github.event.inputs.target == 'all' || github.event.inputs.target == 'desktop'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            bundles: msi
+          - os: ubuntu-22.04
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Read pinned Rust toolchain
+        id: rust-toolchain
+        shell: bash
+        run: |
+          channel=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl wget file patchelf libssl-dev rpm elfutils xdg-utils \
+            libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+          # 与上游 release.yml 同一套顺序；本仓库的 Cargo.lock 需要 4.1，装上 4.0 就等着后面炸
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            || sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
+          sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
+            || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
+          pkg-config --modversion webkit2gtk-4.1 || pkg-config --modversion webkit2gtk-4.0
+
+      - name: Setup pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        shell: bash
+        run: |
+          corepack enable
+          corepack install
+          pnpm --version
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          # 与 ci.yml 的 backend job 同一个 key：那边也是默认（desktop）特性，能直接命中它的缓存
+          shared-key: backend
+
+      - run: pnpm install --frozen-lockfile
+        shell: bash
+
+      # tauri.conf.json 里 createUpdaterArtifacts 是 true，而这条工作流没有签名私钥；
+      # 就地关掉它，否则会停在 "A public key has been found, but no private key"。
+      - name: Build bundles
+        shell: bash
+        run: |
+          pnpm tauri build --bundles ${{ matrix.bundles }} \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.os }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14

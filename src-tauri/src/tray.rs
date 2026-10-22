@@ -1334,7 +1334,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// 启动流程走完：记下启动时退回直连的应用，重建一次菜单。
-pub fn mark_startup_settled(app: &tauri::AppHandle) {
+pub fn mark_startup_settled(app: &crate::compat::AppHandle) {
     {
         let mut failures = lock(&ATTACH_FAILURES);
         for failure in crate::mode::controller::startup_attach_failures_snapshot() {
@@ -1361,7 +1361,7 @@ fn clear_app_problems(app: &AppType) -> bool {
 
 /// 主界面打开了某个应用的页面：这个应用的问题行算处理过了（规格 5.5「打开过对应页面」）。
 #[tauri::command]
-pub fn tray_app_page_seen(app: tauri::AppHandle, app_type: String) {
+pub fn tray_app_page_seen(app: crate::compat::AppHandle, app_type: String) {
     let Ok(app_type) = app_type.parse::<AppType>() else {
         return;
     };
@@ -1491,7 +1491,7 @@ fn switch_feedback(app: &AppType, mode: TrayMode, name: String) -> Option<TrayFe
 }
 
 /// 记下最近一次托盘操作的结果（覆盖上一条）。调用方随后会重建菜单。
-fn record_feedback(app: &tauri::AppHandle, feedback: TrayFeedback) {
+fn record_feedback(app: &crate::compat::AppHandle, feedback: TrayFeedback) {
     *lock(&FEEDBACK) = Some(FeedbackRecord {
         feedback,
         at: std::time::Instant::now(),
@@ -2320,7 +2320,7 @@ fn menu_error(e: impl std::fmt::Display) -> AppError {
 }
 
 fn attach_entry(
-    app: &tauri::AppHandle,
+    app: &crate::compat::AppHandle,
     entry: &TrayEntry,
     handles: &mut HashMap<AppType, Submenu<tauri::Wry>>,
 ) -> Result<Option<MenuItemKind<tauri::Wry>>, AppError> {
@@ -2363,7 +2363,7 @@ fn attach_entry(
 
 /// 创建动态托盘菜单
 pub fn create_tray_menu(
-    app: &tauri::AppHandle,
+    app: &crate::compat::AppHandle,
     app_state: &AppState,
 ) -> Result<Menu<tauri::Wry>, AppError> {
     let texts = TrayTexts::current();
@@ -2400,7 +2400,10 @@ pub fn create_tray_menu(
 }
 
 /// 不挂原生菜单的平台（点图标出托盘面板）：只更新图标圆点、悬停提示和状态记账。
-pub fn sync_tray_status(app: &tauri::AppHandle, app_state: &AppState) -> Result<(), AppError> {
+pub fn sync_tray_status(
+    app: &crate::compat::AppHandle,
+    app_state: &AppState,
+) -> Result<(), AppError> {
     let texts = TrayTexts::current();
     let (_, status) = collect_status(app_state, &texts)?;
     update_problem_indicator(app, &texts, &status.problems);
@@ -2420,7 +2423,7 @@ const DOT_RING_RADIUS: f32 = 0.21;
 
 /// 托盘平时的图标和它是不是 macOS 模板图：macOS 用单色模板图（跟随菜单栏深浅色），读不到时
 /// 和其它平台一样用应用图标。读一次缓存起来，出问题 / 恢复时在它上面加减圆点。
-pub fn base_tray_icon(app: &tauri::AppHandle) -> Option<(Image<'static>, bool)> {
+pub fn base_tray_icon(app: &crate::compat::AppHandle) -> Option<(Image<'static>, bool)> {
     static BASE: OnceLock<Option<(Image<'static>, bool)>> = OnceLock::new();
     BASE.get_or_init(|| {
         #[cfg(target_os = "macos")]
@@ -2503,7 +2506,11 @@ static APPLIED_INDICATOR: Lazy<Mutex<Option<(bool, String)>>> = Lazy::new(|| Mut
 
 /// 问题区有内容时托盘图标加圆点、悬停提示写第一条问题；问题都消失后换回原图标和提示。只在
 /// 变了时才动（Linux 每次换图标都要写临时文件）。
-fn update_problem_indicator(app: &tauri::AppHandle, texts: &TrayTexts, problems: &[TrayProblem]) {
+fn update_problem_indicator(
+    app: &crate::compat::AppHandle,
+    texts: &TrayTexts,
+    problems: &[TrayProblem],
+) {
     // 启动时第一次建菜单那会儿托盘图标还没建，等下一次重建。
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -2546,7 +2553,7 @@ fn update_problem_indicator(app: &tauri::AppHandle, texts: &TrayTexts, problems:
 
 /// 就地更新各应用行的标题（额度变化时走这条），避免 `set_menu` 关掉用户正开着的菜单。
 /// 句柄由上一次 `create_tray_menu` 填充；为空（从未构建过菜单）时无事发生。
-fn update_tray_usage_labels(app: &tauri::AppHandle) {
+fn update_tray_usage_labels(app: &crate::compat::AppHandle) {
     // Linux（AppIndicator）上 `Submenu::set_text` 不稳，标题会变空（#3385）：一律整菜单重建。
     #[cfg(target_os = "linux")]
     {
@@ -2578,7 +2585,7 @@ fn update_tray_usage_labels(app: &tauri::AppHandle) {
     }
 }
 
-pub fn refresh_tray_menu(app: &tauri::AppHandle) {
+pub fn refresh_tray_menu(app: &crate::compat::AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         if crate::tray_panel::USES_NATIVE_MENU {
             match create_tray_menu(app, state.inner()) {
@@ -2600,7 +2607,7 @@ pub fn refresh_tray_menu(app: &tauri::AppHandle) {
 
 /// 悬停到托盘图标时：问题区该出现 / 该消失了（路由服务停了、又起来了）、反馈行显示过了或到点了，
 /// 就重建菜单。只在变了时重建，菜单还没打开，不会被关掉。
-pub fn refresh_tray_if_problems_changed(app: &tauri::AppHandle) {
+pub fn refresh_tray_if_problems_changed(app: &crate::compat::AppHandle) {
     static LAST_CHECK: Mutex<Option<std::time::Instant>> = Mutex::new(None);
     {
         let mut last = lock(&LAST_CHECK);
@@ -2614,12 +2621,12 @@ pub fn refresh_tray_if_problems_changed(app: &tauri::AppHandle) {
 
 /// 路由服务启动 / 停止之后：圆点、问题区、「退出」的后果可能要跟着变。在后台线程比对，
 /// 变了才重建（调用方可能在异步任务里，也可能正等着主线程）。
-pub fn schedule_tray_status_check(app: &tauri::AppHandle) {
+pub fn schedule_tray_status_check(app: &crate::compat::AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || refresh_tray_if_status_changed(&app));
 }
 
-fn refresh_tray_if_status_changed(app: &tauri::AppHandle) {
+fn refresh_tray_if_status_changed(app: &crate::compat::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
@@ -2704,7 +2711,7 @@ pub fn take_tray_navigation() -> Option<TrayNavigation> {
     lock(&PENDING_NAVIGATION).take()
 }
 
-fn navigate(app: &tauri::AppHandle, navigation: TrayNavigation) {
+fn navigate(app: &crate::compat::AppHandle, navigation: TrayNavigation) {
     if let Some(app_type) = navigation
         .app
         .as_deref()
@@ -2727,7 +2734,7 @@ fn navigate(app: &tauri::AppHandle, navigation: TrayNavigation) {
 }
 
 /// 显示并聚焦主窗口；轻量模式下重建窗口。
-pub fn show_main_window(app: &tauri::AppHandle) {
+pub fn show_main_window(app: &crate::compat::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
@@ -2756,7 +2763,7 @@ pub fn show_main_window(app: &tauri::AppHandle) {
 /// 事件 id 形如 `profile_<scope>_<uuid>`（同一项目在各应用子菜单里各有一项，
 /// 应用时只作用于该分组）；`profile_none_<scope>` 表示某分组"不使用项目"
 /// （只清该分组标记，不动配置）。
-pub fn handle_profile_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool {
+pub fn handle_profile_tray_event(app: &crate::compat::AppHandle, event_id: &str) -> bool {
     let Some(suffix) = event_id.strip_prefix("profile_") else {
         return false;
     };
@@ -2844,7 +2851,7 @@ pub fn handle_profile_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool
 }
 
 /// 处理供应商托盘事件（`prov:<应用>:<供应商 id>`）
-pub fn handle_provider_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool {
+pub fn handle_provider_tray_event(app: &crate::compat::AppHandle, event_id: &str) -> bool {
     let Some(rest) = event_id.strip_prefix("prov:") else {
         return false;
     };
@@ -2904,7 +2911,7 @@ enum ClickOutcome {
 /// 点一家供应商：切换照旧走 `ProviderService::switch`（里面先拿切换锁再看模式）。不再先关掉
 /// 自动故障转移（#6022）；点已勾着的那家不再写一次客户端文件。
 fn handle_provider_click(
-    app: &tauri::AppHandle,
+    app: &crate::compat::AppHandle,
     app_type: &AppType,
     provider_id: &str,
 ) -> Result<ClickOutcome, AppError> {
@@ -2942,7 +2949,7 @@ fn handle_provider_click(
     })
 }
 
-fn emit_switched(app: &tauri::AppHandle, app_type: &AppType, provider_id: &str) {
+fn emit_switched(app: &crate::compat::AppHandle, app_type: &AppType, provider_id: &str) {
     let proxy_enabled = crate::mode::current::is_proxy(app_type);
     let auto_failover = app
         .try_state::<AppState>()
@@ -2963,7 +2970,7 @@ fn emit_switched(app: &tauri::AppHandle, app_type: &AppType, provider_id: &str) 
 }
 
 #[cfg(target_os = "macos")]
-pub fn apply_tray_policy(app: &tauri::AppHandle, dock_visible: bool) {
+pub fn apply_tray_policy(app: &crate::compat::AppHandle, dock_visible: bool) {
     use tauri::ActivationPolicy;
 
     let desired_policy = if dock_visible {
@@ -2982,7 +2989,7 @@ pub fn apply_tray_policy(app: &tauri::AppHandle, dock_visible: bool) {
 }
 
 /// 处理托盘菜单事件
-pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
+pub fn handle_tray_menu_event(app: &crate::compat::AppHandle, event_id: &str) {
     log::info!("处理托盘菜单事件: {event_id}");
 
     match event_id {
@@ -3032,7 +3039,7 @@ const MIN_TRAY_USAGE_REFRESH_INTERVAL: std::time::Duration = std::time::Duration
 /// `refresh_tray_menu` 整建，避免用户打开中的菜单被 macOS 系统关闭。
 static TRAY_REBUILD_SCHEDULED: AtomicBool = AtomicBool::new(false);
 
-pub fn schedule_tray_refresh(app: &tauri::AppHandle) {
+pub fn schedule_tray_refresh(app: &crate::compat::AppHandle) {
     if TRAY_REBUILD_SCHEDULED.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -3054,7 +3061,7 @@ pub fn schedule_tray_refresh(app: &tauri::AppHandle) {
 /// 刷新面与 `usage_view` 的展示面严格对齐 —— 每次悬停最多发
 /// `TRAY_APPS.len()` 个用量查询；按供应商用量开关查询，Codex 托管账号
 /// 未保存开关时与卡片一致默认启用。
-pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
+pub(crate) async fn refresh_all_usage_in_tray(app: &crate::compat::AppHandle) {
     use crate::commands::CopilotAuthState;
     use futures::future::join_all;
 
@@ -3167,7 +3174,7 @@ static PANEL_SCRIPT_QUERIES: Lazy<Mutex<HashMap<(AppType, String), std::time::In
 /// 供应商（余额、套餐），缓存里还没有、或距面板上次替它查已超过它自己的自动查询间隔，就在
 /// 后台补查一次——和主界面供应商卡片是同一个查询，结果写进 `UsageCache` 后面板跟着刷新。
 /// 自动查询间隔为 0（关掉了）的不查；在用的那家由 `refresh_all_usage_in_tray` 负责。
-pub(crate) async fn refresh_panel_provider_usage(app: &tauri::AppHandle) {
+pub(crate) async fn refresh_panel_provider_usage(app: &crate::compat::AppHandle) {
     use crate::commands::CopilotAuthState;
     use futures::future::join_all;
 

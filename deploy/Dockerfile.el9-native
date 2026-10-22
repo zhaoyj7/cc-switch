@@ -1,0 +1,64 @@
+# CentOS Stream 9 / RHEL 9 **原生直接运行**版产物：不是镜像，只是一个可执行文件。
+#
+# 背景（实测结论，别重复踩）：
+#   - 正常 Debian 12 产物拷到 EL9 宿主，唯一硬阻塞是 1 个 GLOBAL 符号 `hypot@GLIBC_2.35`；
+#     其余缺失的 UND 全是 WEAK，ld.so 容忍。DT_NEEDED 里没有 webkit/libsoup，
+#     gtk3/glib2 由 EL9 自带（glib 2.68 运行时提供了本二进制需要的全部强符号）。
+#   - LD_PRELOAD 之类注入**消不掉**这个错误：装载阶段 `_dl_check_map_versions` 是按
+#     DT_NEEDED 的目标对象校验版本串的，与别的对象能否供符号无关。
+#   - 所以只能让链接期根本不产生该引用：把 `-L` 指向 EL9 的 glibc，未版本化的 `hypot`
+#     引用就解析成 `hypot@@GLIBC_2.2.5`，`.gnu.version_r` 里不再出现 GLIBC_2.35（已用小探针验证）。
+#   - zig / cargo-zigbuild 那条路不通：`--target x86_64-unknown-linux-gnu.2.34` 被
+#     ring 0.17.14 / aws-lc-sys 0.36.0 的 build script 拒绝。
+#
+# glibc 从 stream9 镜像里 COPY，不依赖会变的 rpm 下载 URL：
+#   podman build --cgroup-manager=cgroupfs -f deploy/Dockerfile.el9-native -t ccs-el9 .
+#   podman create --name x ccs-el9 && podman cp x:/out/cc-switch-server ./ && podman rm x
+# 之后把 cc-switch-server 拷到 EL9 宿主直接跑（不需要容器）。
+#
+# 只需覆盖 libm：实测产物对 libc.so.6 的版本需求最高就是 GLIBC_2.34（EL9 满足），
+# 唯一越界的是 libm 的 hypot@GLIBC_2.35。libc 保持用 Debian 自己的，少一处风险。
+
+FROM quay.io/centos/centos:stream9 AS el9lib
+# 只要这两个：libc/libm 的符号版本表决定最终记录哪些 GLIBC_x.y 需求。
+
+FROM node:22.12.0-slim AS web
+WORKDIR /app
+RUN npm install -g pnpm@10.12.3
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm build:legacy:web && rm -rf node_modules
+
+FROM rust:1-bookworm AS build
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev && rm -rf /var/lib/apt/lists/*
+COPY --from=web /app ./
+COPY --from=el9lib /usr/lib64/libm.so.6 /el9lib/libm.so.6
+# Debian 的 /usr/lib/x86_64-linux-gnu/libm.so 是个链接器脚本，`-lm` 实际解析到哪个 libm.so.6 由它决定。
+# 把它改成指向 EL9 的 glibc：未版本化的 `hypot` 引用落到 `hypot@@GLIBC_2.2.5`，
+# `.gnu.version_r` 里就不再出现 GLIBC_2.35（见 §5.3.1：verneed 只能从链接期消掉）。
+#
+# 为什么不用更省事的 `RUSTFLAGS="-C link-arg=-L/el9lib"`：最小 cargo 项目里它确实有效
+# （见 tools/wsl-el9-link-order-probe.sh 的 B 组），但真实构建里 gtk-sys / webkit2gtk-sys
+# 等 build script 会先 emit `-L /usr/lib/x86_64-linux-gnu`，Debian 的 libm.so 先被命中，
+# 实测真产物仍是 hypot@GLIBC_2.35。覆盖链接脚本与搜索顺序无关，所以用 C 组做法。
+RUN printf 'GROUP ( /el9lib/libm.so.6 )\n' > /usr/lib/x86_64-linux-gnu/libm.so \
+ && cargo build --release --no-default-features --features headless \
+      --bin cc-switch-server --manifest-path src-tauri/Cargo.toml
+
+# 守卫单独一步（cargo 层因此可缓存，改断言不用重编 15 分钟）：
+# 谁以后又把 GLIBC_2.35+ 的需求引回来，这里直接构建失败，而不是产出一个在 EL9 上跑不了的二进制。
+# 失败时把 offending 符号和 verneed 一起打出来，省一轮排查。
+RUN BIN=/app/src-tauri/target/release/cc-switch-server; \
+    if readelf -V "$BIN" | grep -q 'GLIBC_2\.3[5-9]'; then \
+      echo "违反 EL9 兼容：出现 GLIBC_2.35+ 需求"; \
+      readelf --dyn-syms -W "$BIN" | grep -E 'GLIBC_2\.3[5-9]'; \
+      readelf -V "$BIN" | awk '/Version needs/{f=1} f' | grep -E 'File:|Name:'; \
+      exit 1; \
+    fi; \
+    mkdir -p /out && cp "$BIN" /out/
+
+# 守卫：上面那条 readelf 断言会让"意外又引入 GLIBC_2.35+"的改动直接构建失败，
+# 而不是产出一个在目标服务器上跑不了的二进制。
+FROM scratch AS export
+COPY --from=build /out/cc-switch-server /cc-switch-server

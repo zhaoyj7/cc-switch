@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use tauri::ipc::{Channel, Response};
+#[cfg(feature = "desktop")]
 use tauri_plugin_dialog::DialogExt;
 
 use crate::session_manager;
@@ -109,6 +110,7 @@ pub async fn get_session_image(
     .map_err(|e| format!("Failed to load session image: {e}"))?
 }
 
+#[cfg(feature = "desktop")]
 /// 在文件管理器中显示某个已存在的文件或目录（决策 D3）；不提供「用默认程序打开」。
 #[tauri::command]
 pub async fn reveal_session_path(path: String) -> Result<bool, String> {
@@ -216,6 +218,7 @@ pub async fn delete_sessions(
         .map_err(|e| format!("Failed to delete sessions: {e}"))
 }
 
+#[cfg(feature = "desktop")]
 /// 把会话导出为 Markdown 文件：由后端弹出保存对话框并写入。写入路径只能是用户在
 /// 对话框里选的位置，前端不能指定任意路径。用户取消时返回 `None`，否则返回保存路径。
 #[tauri::command]

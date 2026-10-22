@@ -254,6 +254,62 @@ fn remove_toml_table_like(target: &mut dyn TableLike, source: &dyn TableLike) {
     }
 }
 
+fn merge_toml_item(target: &mut Item, source: &Item) {
+    if let Some(source_table) = source.as_table_like() {
+        if let Some(target_table) = target.as_table_like_mut() {
+            merge_toml_table_like(target_table, source_table);
+            return;
+        }
+    }
+
+    *target = source.clone();
+}
+
+fn merge_toml_table_like(target: &mut dyn TableLike, source: &dyn TableLike) {
+    for (key, source_item) in source.iter() {
+        match target.get_mut(key) {
+            Some(target_item) => merge_toml_item(target_item, source_item),
+            None => {
+                target.insert(key, source_item.clone());
+            }
+        }
+    }
+}
+
+/// 对编辑器里的 config.toml 文本做通用配置片段的合并/剥离。
+///
+/// 必须在后端用 toml_edit 做：前端 smol-toml 只能 parse → merge → 整文档重序列化，
+/// 注释全丢、键序重排，还会生成多余的空父表头（如 `[model_providers]`）。
+pub fn update_toml_common_config_snippet(
+    config_toml: &str,
+    snippet_toml: &str,
+    enabled: bool,
+) -> Result<String, AppError> {
+    let trimmed = snippet_toml.trim();
+    if trimmed.is_empty() {
+        return Ok(config_toml.to_string());
+    }
+
+    let mut target_doc = if config_toml.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        config_toml
+            .parse::<DocumentMut>()
+            .map_err(|e| AppError::Message(format!("Invalid Codex config.toml: {e}")))?
+    };
+    let source_doc = trimmed
+        .parse::<DocumentMut>()
+        .map_err(|e| AppError::Message(format!("Invalid Codex common config snippet: {e}")))?;
+
+    if enabled {
+        merge_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
+    } else {
+        remove_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
+    }
+
+    Ok(target_doc.to_string())
+}
+
 fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet: &str) -> bool {
     let trimmed = snippet.trim();
     if trimmed.is_empty() {

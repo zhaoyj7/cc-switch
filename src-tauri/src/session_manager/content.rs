@@ -674,6 +674,7 @@ fn project_dir_for(source: &ValidatedSource) -> Option<PathBuf> {
 
 /// `reveal_session_path` 的路径校验：绝对路径或 `file://` URL，且必须已存在。
 /// 只在文件管理器里定位，不打开文件，因此不限制目录。
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 pub fn resolve_reveal_path(path: &str) -> Result<PathBuf, String> {
     let path = if path.starts_with("file://") {
         url::Url::parse(path)

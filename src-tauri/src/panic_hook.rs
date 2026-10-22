@@ -86,6 +86,7 @@ fn rotate_crash_log_if_needed(path: &Path) -> std::io::Result<()> {
 }
 
 /// 获取日志目录路径
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 pub fn get_log_dir() -> PathBuf {
     get_app_config_dir().join("logs")
 }

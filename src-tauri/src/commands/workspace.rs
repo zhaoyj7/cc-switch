@@ -1,6 +1,8 @@
+#[cfg(feature = "desktop")]
+use crate::compat::AppHandle;
 use regex::Regex;
 use std::sync::LazyLock;
-use tauri::AppHandle;
+#[cfg(feature = "desktop")]
 use tauri_plugin_opener::OpenerExt;
 
 use crate::config::write_text_file;
@@ -339,6 +341,7 @@ pub async fn write_workspace_file(filename: String, content: String) -> Result<(
         .map_err(|e| format!("Failed to write workspace file {filename}: {e}"))
 }
 
+#[cfg(feature = "desktop")]
 /// Open the workspace or memory directory in the system file manager.
 /// `subdir`: "workspace" opens `~/.openclaw/workspace/`,
 ///           "memory" opens `~/.openclaw/workspace/memory/`.

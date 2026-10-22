@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::app_config::AppType;
+#[cfg(feature = "desktop")]
+use crate::compat::AppHandle;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use crate::services::ProviderService;
 use indexmap::IndexSet;
@@ -10,8 +12,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use tauri::AppHandle;
 use tauri::State;
+#[cfg(feature = "desktop")]
 use tauri_plugin_opener::OpenerExt;
 
 #[path = "tool_node_requirement.rs"]
@@ -29,6 +31,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// 外部链接白名单：只允许 `http:` / `https:` / `mailto:`。
 /// 不带协议的裸域名（如 `example.com/docs`）按旧行为补 `https://`；
 /// `javascript:`、`file:`、`data:` 及其他自定义协议一律拒绝（前端已过滤，这里是第二道）。
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 fn validate_external_url(raw: &str) -> Result<String, String> {
     let raw = raw.trim();
     let parsed = match url::Url::parse(raw) {
@@ -46,6 +49,7 @@ fn validate_external_url(raw: &str) -> Result<String, String> {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_external(app: AppHandle, url: String) -> Result<bool, String> {
     let url = validate_external_url(&url)?;
@@ -73,6 +77,7 @@ pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
     .map_err(|e| format!("剪贴板任务执行失败: {e}"))?
 }
 
+#[cfg(feature = "desktop")]
 /// 检查更新
 #[tauri::command]
 pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
@@ -89,6 +94,7 @@ pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
 
 /// 便携版新版本压缩包的下载地址，命名与 release.yml 的「Prepare Windows Assets」一致：
 /// `CC-Switch-v<版本>-Windows[-arm64]-Portable.zip`。版本号不像版本号时返回 None。
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 fn portable_zip_url(version: &str, arm64: bool) -> Option<String> {
     let version = version.trim().trim_start_matches('v');
     let looks_like_version = version.starts_with(|c: char| c.is_ascii_digit())
@@ -104,6 +110,7 @@ fn portable_zip_url(version: &str, arm64: bool) -> Option<String> {
     ))
 }
 
+#[cfg(feature = "desktop")]
 /// 便携版更新：直接下载对应架构的新版压缩包（解压覆盖即可，数据在 ~/.cc-switch 不受影响）。
 /// 不做原地替换自身 exe：那样很容易被杀毒软件当成病毒拦截。
 #[tauri::command]
@@ -5621,6 +5628,7 @@ read -r _
     }
 }
 
+#[cfg(feature = "desktop")]
 /// 设置窗口主题（Windows/macOS 标题栏颜色）
 /// theme: "dark" | "light" | "system"
 #[tauri::command]

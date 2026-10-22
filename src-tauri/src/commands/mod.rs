@@ -74,3 +74,7 @@ pub use s3_sync::*;
 pub use usage::*;
 pub use webdav_sync::*;
 pub use workspace::*;
+
+// 无头构建：桌面专属命令的替身（与上面各模块里 #[cfg(feature = "desktop")] 的实现二选一）
+#[cfg(not(feature = "desktop"))]
+pub use crate::headless::stubs::*;

@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use crate::compat::AppHandle;
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -134,7 +135,7 @@ pub fn notify_db_changed(table: &str) {
     let _ = enqueue_change_signal(tx, table);
 }
 
-pub fn start_worker(db: Arc<crate::database::Database>, app: tauri::AppHandle) {
+pub fn start_worker(db: Arc<crate::database::Database>, app: crate::compat::AppHandle) {
     if DB_CHANGE_TX.get().is_some() {
         return;
     }
@@ -153,7 +154,7 @@ pub fn start_worker(db: Arc<crate::database::Database>, app: tauri::AppHandle) {
 async fn run_worker_loop(
     db: Arc<crate::database::Database>,
     mut rx: Receiver<String>,
-    app: tauri::AppHandle,
+    app: crate::compat::AppHandle,
 ) {
     while let Some(first_table) = rx.recv().await {
         let started_at = Instant::now();

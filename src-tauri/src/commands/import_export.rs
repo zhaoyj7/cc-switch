@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::State;
+#[cfg(feature = "desktop")]
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::sync_support::{
@@ -96,6 +97,7 @@ pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<V
 
 // ─── File dialogs ────────────────────────────────────────────
 
+#[cfg(feature = "desktop")]
 /// 保存文件对话框
 #[tauri::command]
 pub async fn save_file_dialog<R: tauri::Runtime>(
@@ -112,6 +114,7 @@ pub async fn save_file_dialog<R: tauri::Runtime>(
     Ok(result.map(|p| p.to_string()))
 }
 
+#[cfg(feature = "desktop")]
 /// 打开文件对话框
 #[tauri::command]
 pub async fn open_file_dialog<R: tauri::Runtime>(
@@ -126,6 +129,7 @@ pub async fn open_file_dialog<R: tauri::Runtime>(
     Ok(result.map(|p| p.to_string()))
 }
 
+#[cfg(feature = "desktop")]
 /// 打开 ZIP 文件选择对话框
 #[tauri::command]
 pub async fn open_zip_file_dialog<R: tauri::Runtime>(
@@ -232,6 +236,7 @@ pub async fn delete_backup_location(id: String) -> Result<u64, String> {
     .map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "desktop")]
 /// 在文件管理器中显示一类备份所在的目录
 #[tauri::command]
 pub async fn reveal_backup_location(id: String) -> Result<bool, String> {

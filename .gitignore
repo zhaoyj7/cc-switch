@@ -29,3 +29,17 @@ copilot-api
 .history
 CODEBUDDY.md
 mainWindow.js
+
+# 旧 UI 复活 + 无头版：构建产物与本地验证现场，一律不入库
+# dist-legacy 由 `pnpm build:legacy:web` 生成；无头版构建必须先跑它（rust-embed 缺目录是硬编译错误）
+dist-legacy/
+dist-legacy-desktop/
+.ci-sandbox/
+.e2e-home/
+
+# 本地一次性验证的落盘证据（留在机器上，见 docs/HANDOFF-legacy-web-headless.md §11.3）
+tools/*.txt
+tools/cmd-diff.json
+tools/lib.rs.bak
+tools/hypot-shim.c
+tools/hypot-shim.map

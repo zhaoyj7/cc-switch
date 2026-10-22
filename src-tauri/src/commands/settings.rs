@@ -1,10 +1,14 @@
 #![allow(non_snake_case)]
 
-use tauri::{AppHandle, Emitter};
+use crate::compat::AppHandle;
+#[cfg(feature = "desktop")]
+use tauri::Emitter;
+#[cfg(feature = "desktop")]
 use tauri_plugin_updater::UpdaterExt;
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
 #[derive(Clone, serde::Serialize)]
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 struct UpdateDownloadProgress {
     downloaded: u64,
     total: Option<u64>,
@@ -241,6 +245,7 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
     })
 }
 
+#[cfg(feature = "desktop")]
 /// 重启应用程序（当 app_config_dir 变更后使用）
 #[tauri::command]
 pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
@@ -261,6 +266,7 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(feature = "desktop")]
 /// 下载并安装应用更新，然后由后端直接重启应用。
 ///
 /// macOS 更新会原地替换 `.app` bundle。如果先返回前端、再让旧 WebView 调
@@ -338,6 +344,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
     }
 }
 
+#[cfg(feature = "desktop")]
 /// 检查是否有可用的应用更新，返回可用的新版本号（无更新时返回 None）。
 ///
 /// 数据库版本过新的恢复界面用它判断：升级应用能否解决问题。若返回 None，说明

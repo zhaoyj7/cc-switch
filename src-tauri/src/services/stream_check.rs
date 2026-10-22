@@ -35,8 +35,9 @@ pub enum HealthStatus {
     Failed,
 }
 
-/// 连通性检查参数（固定默认值，不对用户开放）
-#[derive(Debug, Clone)]
+/// 连通性检查配置（旧版前端有设置面板，存 settings 表；缺省见 `Default`）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StreamCheckConfig {
     /// 单次探测超时（秒）
     pub timeout_secs: u64,

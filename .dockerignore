@@ -1,0 +1,16 @@
+# 构建上下文只留源码：Windows 本机的 node_modules / target / dist 传进 Docker 只会拖慢
+# 且和容器里的 Linux 产物冲突。dist-legacy 由镜像里的 build:legacy:web 重新生成。
+node_modules
+**/node_modules
+.git
+.github
+dist
+dist-legacy
+src-tauri/target
+target
+.e2e-home
+.e2e-*
+docs
+images
+CHANGELOG.md
+README*.md

@@ -109,7 +109,7 @@ pub fn get_app_mode(
 /// 已经在路由 / 聚合模式时当场生效。
 #[tauri::command]
 pub async fn set_proxy_route(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     state: tauri::State<'_, AppState>,
     app_type: String,
     provider_id: String,
@@ -186,7 +186,7 @@ pub async fn acknowledge_codex_stale_clients() -> Result<(), String> {
 /// Stack 模型的提示；失败时 `partial` 为真表示已部分写入，下次操作或重启 CC Switch 时补完。
 #[tauri::command]
 pub async fn set_proxy_stack_member(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     state: tauri::State<'_, AppState>,
     app_type: String,
     provider_id: String,
@@ -338,6 +338,68 @@ pub async fn update_proxy_config_for_app(
         .await
 }
 
+async fn get_default_cost_multiplier_internal(
+    state: &AppState,
+    app_type: &str,
+) -> Result<String, AppError> {
+    let db = &state.db;
+    db.get_default_cost_multiplier(app_type).await
+}
+
+#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+pub async fn get_default_cost_multiplier_test_hook(
+    state: &AppState,
+    app_type: &str,
+) -> Result<String, AppError> {
+    get_default_cost_multiplier_internal(state, app_type).await
+}
+
+/// 获取默认成本倍率
+///
+/// 只读写 `proxy_config.default_cost_multiplier` 这一列。v4 的计费链路不使用它
+/// （`proxy/usage/logger.rs` 一律按倍率 1 计算，见 `response_processor.rs` 的
+/// `test_log_usage_ignores_legacy_multiplier_and_provider_overrides`），所以这里存进去
+/// 的值不会改变任何用量统计。
+#[tauri::command]
+pub async fn get_default_cost_multiplier(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+) -> Result<String, String> {
+    get_default_cost_multiplier_internal(&state, &app_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn set_default_cost_multiplier_internal(
+    state: &AppState,
+    app_type: &str,
+    value: &str,
+) -> Result<(), AppError> {
+    let db = &state.db;
+    db.set_default_cost_multiplier(app_type, value).await
+}
+
+#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
+pub async fn set_default_cost_multiplier_test_hook(
+    state: &AppState,
+    app_type: &str,
+    value: &str,
+) -> Result<(), AppError> {
+    set_default_cost_multiplier_internal(state, app_type, value).await
+}
+
+/// 设置默认成本倍率（v4 计费链路不消费此值，理由见 `get_default_cost_multiplier`）
+#[tauri::command]
+pub async fn set_default_cost_multiplier(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+    value: String,
+) -> Result<(), String> {
+    set_default_cost_multiplier_internal(&state, &app_type, &value)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 async fn get_pricing_model_source_internal(
     state: &AppState,
     app_type: &str,
@@ -441,7 +503,7 @@ pub async fn get_provider_health(
 /// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
 #[tauri::command]
 pub async fn reset_circuit_breaker(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     state: tauri::State<'_, AppState>,
     provider_id: String,
     app_type: String,

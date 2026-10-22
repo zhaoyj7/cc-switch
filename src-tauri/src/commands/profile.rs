@@ -61,7 +61,7 @@ pub struct ProfilesResponse {
 /// 共用此函数，保证事件 payload 形状一致（前端 App.tsx 的
 /// provider-switched 监听依赖该形状）。
 pub fn emit_profile_apply_events(
-    app: &tauri::AppHandle,
+    app: &crate::compat::AppHandle,
     state: &AppState,
     profile_id: &str,
     scope: ProfileScope,
@@ -169,7 +169,7 @@ pub fn clear_current_profile(state: State<'_, AppState>, scope: String) -> Resul
 /// 内部使用 block_on 获取切换锁，放进 async 命令会在运行时线程上 panic。
 #[tauri::command]
 pub fn apply_profile(
-    app: tauri::AppHandle,
+    app: crate::compat::AppHandle,
     state: State<'_, AppState>,
     id: String,
     scope: String,

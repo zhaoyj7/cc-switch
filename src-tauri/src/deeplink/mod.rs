@@ -56,6 +56,7 @@ pub struct PendingDeepLinkEntry {
 }
 
 static PENDING_DEEPLINK: Mutex<Option<PendingDeepLinkEntry>> = Mutex::new(None);
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 static NEXT_PENDING_ID: AtomicU64 = AtomicU64::new(1);
 
 fn pending_slot() -> std::sync::MutexGuard<'static, Option<PendingDeepLinkEntry>> {
@@ -65,6 +66,7 @@ fn pending_slot() -> std::sync::MutexGuard<'static, Option<PendingDeepLinkEntry>
 }
 
 /// 暂存一条待处理的深链接，覆盖还没处理的旧链接（只保留最新一条）
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 pub fn set_pending_deeplink(link: PendingDeepLink) {
     let id = NEXT_PENDING_ID.fetch_add(1, Ordering::Relaxed);
     *pending_slot() = Some(PendingDeepLinkEntry { id, link });

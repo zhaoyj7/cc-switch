@@ -273,6 +273,7 @@ pub fn delete_location(id: &str) -> Result<u64, AppError> {
 }
 
 /// 在文件管理器中显示该类备份所在的目录。
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 pub fn location_dir(id: &str) -> Result<PathBuf, AppError> {
     let category = find(id)?;
     if !category.dir.exists() {

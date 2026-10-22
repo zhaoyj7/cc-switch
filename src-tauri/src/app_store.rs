@@ -21,12 +21,28 @@ fn update_cached_override(value: Option<PathBuf>) {
     }
 }
 
-/// 获取缓存中的 app_config_dir 覆盖路径
+/// 获取当前的 app_config_dir 覆盖路径。
+///
+/// `CC_SWITCH_DATA_DIR` 优先于 Store：无头服务的 `--data-dir` 就是把它写成环境变量，
+/// 而 Store 会在启动流程里被 `refresh_app_config_dir_override` 重读覆盖，
+/// 命令行显式指定的目录不该被一次刷新冲掉。
 pub fn get_app_config_dir_override() -> Option<PathBuf> {
+    if let Some(path) = env_app_config_dir_override() {
+        return Some(path);
+    }
     override_cache().read().ok()?.clone()
 }
 
-fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
+fn env_app_config_dir_override() -> Option<PathBuf> {
+    let raw = std::env::var("CC_SWITCH_DATA_DIR").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(resolve_path(trimmed))
+}
+
+fn read_override_from_store(app: &crate::compat::AppHandle) -> Option<PathBuf> {
     let store = match app.store_builder("app_paths.json").build() {
         Ok(store) => store,
         Err(e) => {
@@ -64,7 +80,7 @@ fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
 }
 
 /// 从 Store 刷新 app_config_dir 覆盖值并更新缓存
-pub fn refresh_app_config_dir_override(app: &tauri::AppHandle) -> Option<PathBuf> {
+pub fn refresh_app_config_dir_override(app: &crate::compat::AppHandle) -> Option<PathBuf> {
     let value = read_override_from_store(app);
     update_cached_override(value.clone());
     value
@@ -72,7 +88,7 @@ pub fn refresh_app_config_dir_override(app: &tauri::AppHandle) -> Option<PathBuf
 
 /// 写入 app_config_dir 到 Tauri Store
 pub fn set_app_config_dir_to_store(
-    app: &tauri::AppHandle,
+    app: &crate::compat::AppHandle,
     path: Option<&str>,
 ) -> Result<(), AppError> {
     let store = app
@@ -125,7 +141,9 @@ fn resolve_path(raw: &str) -> PathBuf {
 }
 
 /// 从旧的 settings.json 迁移 app_config_dir 到 Store
-pub fn migrate_app_config_dir_from_settings(app: &tauri::AppHandle) -> Result<(), AppError> {
+pub fn migrate_app_config_dir_from_settings(
+    app: &crate::compat::AppHandle,
+) -> Result<(), AppError> {
     // app_config_dir 已从 settings.json 移除，此函数保留但不再执行迁移
     // 如果用户在旧版本设置过 app_config_dir，需要在 Store 中手动配置
     log::info!("app_config_dir 迁移功能已移除，请在设置中重新配置");

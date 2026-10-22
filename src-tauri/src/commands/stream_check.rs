@@ -6,8 +6,11 @@
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::error::AppError;
-use crate::services::stream_check::{StreamCheckConfig, StreamCheckResult, StreamCheckService};
+use crate::services::stream_check::{
+    HealthStatus, StreamCheckConfig, StreamCheckResult, StreamCheckService,
+};
 use crate::store::AppState;
+use std::collections::HashSet;
 use tauri::State;
 
 /// 连通性检查（单个供应商）
@@ -18,6 +21,8 @@ pub async fn stream_check_provider(
     app_type: AppType,
     provider_id: String,
 ) -> Result<StreamCheckResult, AppError> {
+    let config = state.db.get_stream_check_config()?;
+
     let providers = state.db.get_all_providers(app_type.as_str())?;
     let provider = providers
         .get(&provider_id)
@@ -26,13 +31,89 @@ pub async fn stream_check_provider(
     // Copilot 端点是动态的（随 OAuth token 解析），需预先取出 host 再探测；
     // 其余供应商传 None，由服务层从 settings_config 提取 base_url。无需鉴权。
     let base_url_override = resolve_copilot_base_url_override(provider, &copilot_state).await?;
-    StreamCheckService::check_with_retry(
-        &app_type,
-        provider,
-        &StreamCheckConfig::default(),
-        base_url_override,
-    )
-    .await
+    StreamCheckService::check_with_retry(&app_type, provider, &config, base_url_override).await
+}
+
+/// 批量连通性检查
+#[tauri::command]
+pub async fn stream_check_all_providers(
+    state: State<'_, AppState>,
+    copilot_state: State<'_, CopilotAuthState>,
+    app_type: AppType,
+    proxy_targets_only: bool,
+) -> Result<Vec<(String, StreamCheckResult)>, AppError> {
+    let config = state.db.get_stream_check_config()?;
+    let providers = state.db.get_all_providers(app_type.as_str())?;
+
+    let allowed_ids: Option<HashSet<String>> = if proxy_targets_only {
+        let mut ids = HashSet::new();
+        // v3 这里直接读 DB 的 is_current 指针；v4 要求写明用途（见 mode::current 的守卫测试），
+        // 接管中真正在跑流量的那家才是代理目标，所以用 Purpose::InUse。
+        if let Ok(Some(current_id)) = crate::mode::current::provider_for(
+            &state.db,
+            &app_type,
+            crate::mode::current::Purpose::InUse,
+        ) {
+            ids.insert(current_id);
+        }
+        if let Ok(queue) = state.db.get_failover_queue(app_type.as_str()) {
+            for item in queue {
+                ids.insert(item.provider_id);
+            }
+        }
+        Some(ids)
+    } else {
+        None
+    };
+
+    let mut results = Vec::new();
+    for (id, provider) in providers {
+        // Official OAuth providers intentionally have no user-configured probe
+        // target. Never turn their runtime adapter defaults into unauthenticated
+        // network probes against first-party endpoints.
+        if provider.category.as_deref() == Some("official") {
+            continue;
+        }
+        if let Some(ids) = &allowed_ids {
+            if !ids.contains(&id) {
+                continue;
+            }
+        }
+
+        let base_url_override =
+            resolve_copilot_base_url_override(&provider, &copilot_state).await?;
+        let result =
+            StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
+                .await
+                .unwrap_or_else(|e| StreamCheckResult {
+                    status: HealthStatus::Failed,
+                    success: false,
+                    message: e.to_string(),
+                    response_time_ms: None,
+                    http_status: None,
+                    tested_at: chrono::Utc::now().timestamp(),
+                    retry_count: 0,
+                });
+
+        results.push((id, result));
+    }
+
+    Ok(results)
+}
+
+/// 获取连通性检查配置
+#[tauri::command]
+pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, AppError> {
+    state.db.get_stream_check_config()
+}
+
+/// 保存连通性检查配置
+#[tauri::command]
+pub fn save_stream_check_config(
+    state: State<'_, AppState>,
+    config: StreamCheckConfig,
+) -> Result<(), AppError> {
+    state.db.set_stream_check_config(&config)
 }
 
 /// Copilot 供应商的 base_url 需要从 OAuth 管理器动态解析（按账号或默认端点）。

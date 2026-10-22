@@ -38,7 +38,7 @@ pub fn get_current_provider(state: State<'_, AppState>, app: String) -> Result<S
 
 #[tauri::command]
 pub async fn add_provider(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] addToLive: Option<bool>,
@@ -59,7 +59,7 @@ pub async fn add_provider(
 
 #[tauri::command]
 pub async fn update_provider(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] originalId: Option<String>,
@@ -88,7 +88,7 @@ pub async fn update_provider(
 /// Codex draft metadata wins over the stored provider's metadata when supplied.
 #[tauri::command]
 pub async fn get_provider_editor_view(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     app: String,
     #[allow(non_snake_case)] settingsConfig: serde_json::Value,
     category: Option<String>,
@@ -164,7 +164,7 @@ pub fn switch_provider_test_hook(
 
 #[tauri::command]
 pub async fn switch_provider(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     app: String,
     id: String,
 ) -> Result<SwitchResult, String> {
@@ -504,7 +504,7 @@ pub(crate) fn suggested_claude_desktop_routes(
 #[allow(non_snake_case)]
 #[tauri::command]
 pub async fn queryProviderUsage(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     state: State<'_, AppState>,
     copilot_state: State<'_, CopilotAuthState>,
     xai_state: State<'_, XaiOAuthState>,
@@ -910,7 +910,7 @@ pub fn update_endpoint_last_used(
 /// 排序就是故障转移队列的优先级，托盘按它列队列：改完重建托盘。
 #[tauri::command]
 pub fn update_providers_sort_order(
-    app_handle: tauri::AppHandle,
+    app_handle: crate::compat::AppHandle,
     state: State<'_, AppState>,
     app: String,
     updates: Vec<ProviderSortUpdate>,
@@ -922,9 +922,9 @@ pub fn update_providers_sort_order(
     Ok(changed)
 }
 
+use crate::compat::AppHandle;
 use crate::provider::UniversalProvider;
 use std::collections::HashMap;
-use tauri::AppHandle;
 
 #[derive(Clone, serde::Serialize)]
 pub struct UniversalProviderSyncedEvent {

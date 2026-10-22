@@ -282,6 +282,29 @@ impl Database {
         self.set_setting("optimizer_config", &json)
     }
 
+    // --- 连通性检查配置 ---
+
+    /// 获取连通性检查配置，没存过就用内置默认值
+    pub fn get_stream_check_config(
+        &self,
+    ) -> Result<crate::services::stream_check::StreamCheckConfig, AppError> {
+        match self.get_setting("stream_check_config")? {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| AppError::Database(format!("解析连通性检查配置失败: {e}"))),
+            None => Ok(crate::services::stream_check::StreamCheckConfig::default()),
+        }
+    }
+
+    /// 写入连通性检查配置
+    pub fn set_stream_check_config(
+        &self,
+        config: &crate::services::stream_check::StreamCheckConfig,
+    ) -> Result<(), AppError> {
+        let json = serde_json::to_string(config)
+            .map_err(|e| AppError::Database(format!("序列化连通性检查配置失败: {e}")))?;
+        self.set_setting("stream_check_config", &json)
+    }
+
     // --- Copilot 优化器配置 ---
 
     /// 获取 Copilot 优化器配置
